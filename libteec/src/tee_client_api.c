@@ -455,6 +455,7 @@ static void teec_free_temp_refs(TEEC_Operation *operation,
 
 static TEEC_Result ioctl_errno_to_res(int err)
 {
+	EMSG("err: %08X", err);
 	switch (err) {
 	case ENOMEM:
 		return TEEC_ERROR_OUT_OF_MEMORY;
@@ -519,12 +520,15 @@ TEEC_Result TEEC_OpenSession(TEEC_Context *ctx, TEEC_Session *session,
 
 	rc = ioctl(ctx->fd, TEE_IOC_OPEN_SESSION, &buf_data);
 	if (rc) {
-		EMSG("TEE_IOC_OPEN_SESSION failed");
+		EMSG("TEE_IOC_OPEN_SESSION failed. rc: %08X", rc);
 		eorig = TEEC_ORIGIN_COMMS;
 		res = ioctl_errno_to_res(errno);
 		goto out_free_temp_refs;
 	}
 	res = arg->ret;
+	if (res != TEEC_SUCCESS) {
+		EMSG("TEE_IOC_OPEN_SESSION failed in alternate path. res: %08X", res);
+	}
 	eorig = arg->ret_origin;
 	if (res == TEEC_SUCCESS) {
 		session->ctx = ctx;
@@ -535,6 +539,7 @@ TEEC_Result TEEC_OpenSession(TEEC_Context *ctx, TEEC_Session *session,
 out_free_temp_refs:
 	teec_free_temp_refs(operation, shm);
 out:
+	EMSG("res: %08X", res);
 	if (ret_origin)
 		*ret_origin = eorig;
 	return res;
@@ -726,26 +731,26 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 	if (ctx->reg_mem) {
 		shm->buffer = malloc(s);
 		if (!shm->buffer)
-			return TEEC_ERROR_OUT_OF_MEMORY;
+			return TEEC_ERROR_OUT_OF_MEMORY & 0x0FFFFFFF;
 
 		fd = teec_shm_register(ctx->fd, shm->buffer, s, &shm->id);
 		if (fd < 0) {
 			free(shm->buffer);
 			shm->buffer = NULL;
-			return TEEC_ERROR_OUT_OF_MEMORY;
+			return TEEC_ERROR_OUT_OF_MEMORY & 0x0EFFFFFF;
 		}
 		shm->registered_fd = fd;
 	} else {
 		fd = teec_shm_alloc(ctx->fd, s, &shm->id);
 		if (fd < 0)
-			return TEEC_ERROR_OUT_OF_MEMORY;
+			return TEEC_ERROR_OUT_OF_MEMORY & 0x0DFFFFFF;
 
 		shm->buffer = mmap(NULL, s, PROT_READ | PROT_WRITE,
 				   MAP_SHARED, fd, 0);
 		close(fd);
 		if (shm->buffer == (void *)MAP_FAILED) {
 			shm->id = -1;
-			return TEEC_ERROR_OUT_OF_MEMORY;
+			return TEEC_ERROR_OUT_OF_MEMORY & 0x0CFFFFFF;
 		}
 		shm->registered_fd = -1;
 	}
